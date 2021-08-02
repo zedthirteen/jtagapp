@@ -1,0 +1,4 @@
+jtagapp/jtag
+jtagapp/*.o
+jtaglib
+
