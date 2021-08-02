@@ -1,0 +1,42 @@
+The raspberry by hat EEPROM is used to configure the GPIO lines.
+
+Fit the programming link at "CFG" header pins and power the raspbetrry pi 
+with the jtag hat.
+
+Note: the eepromutils folder will only be available on development systems
+
+log in to "pi" account 
+
+   cd ~/hats/eepromutils/
+
+   sudo ./eepflash.sh -w -f=blank.eep -t=24c32
+
+(type yes when prompted)
+
+   sudo ./eepflash.sh -w -f=jtag_hat_with_dt.eep -t=24c32
+
+(type yes when prompted)
+
+remove the programming link
+
+   sudo reboot
+
+log back in to "pi" account
+
+   cd /proc/device-tree/hat
+
+   more vendor
+
+(should report "Flowbird Transport Intelligence")
+
+   more product
+
+(should report "JTAG Adaptor Board")
+
+   more product_ver
+
+(should report "0x0002" for current version but could be higher if board changes are made)
+
+   sudo shutdown -h now
+
+(to power down device when finished)

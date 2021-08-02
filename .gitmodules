@@ -1,0 +1,3 @@
+[submodule "jtagapp/ini"]
+	path = jtagapp/ini
+	url = https://github/rxi.ini
