@@ -1,0 +1,115 @@
+/*** Definitions of the JTAG BSR pins for sequence Intel 386EX CPU */
+/*** Note MIO shiftedout last */
+
+#define BSR_Length	202	// number of bits in JTAG BSR string. 101 x 2 (+1 for M5 "BYPASS")
+
+#define D15	0
+#define D14	1
+#define D13	2
+#define D12	3
+#define D11	4
+#define D10	5
+#define D9	6
+#define D8	7
+#define D7	8
+#define D6	9
+#define D5	10
+#define D4	11
+#define D3	12
+#define D2	13
+#define D1	14
+#define D0	15
+#define LBA	16
+#define jCS6	17 // there is a CS6 in termios.h ?
+#define UCS	18
+#define P27	19
+#define P26	20
+#define P25	21
+#define DACK0	22
+#define P24	23
+#define CS4	23
+#define P23	24
+#define CS3	24
+#define P22	25
+#define CS2	25
+#define P21	26
+#define CS1	26
+#define P20	27
+#define CS0	27
+#define SMIACT	28
+#define DRQ1	29
+#define DRQ0	30
+#define WDTOUT	31
+#define EOP	32
+#define DACK1	33
+#define P17	34
+#define RESET	35
+#define P16	36
+#define P15	37
+#define P14	38
+#define P13	39
+#define P12	40
+
+#define P11	41
+#define P10	42
+#define FLT	43
+#define STXCLK	44
+#define INT7	45
+#define INT6	46
+#define INT5	47
+#define INT4	48
+#define TMRGATE2	49
+#define TMROUT2	50
+#define NMI	51
+#define PEREQ	52
+#define P37	53
+#define P36	54
+#define P35	55
+#define P34	56
+#define P33	57
+#define P32	58
+#define SSIOTX	59
+#define SSIORX	60
+#define SRXCLK	61
+#define P31	62
+#define P30	63
+#define SMI	64
+#define A25	65
+#define A24	66
+#define A23	67
+#define A22	68
+#define A21	69
+#define A20	70
+#define A19	71
+#define A18	72
+#define A17	73
+#define A16	74
+#define A15	75
+#define A14	76
+#define A13	77
+#define A12	78
+#define A11	79
+#define A10	80
+#define A9	81
+#define A8	82
+#define A7	83
+#define A6	84
+#define A5	85
+#define A4	86
+#define A3	87
+#define A2	88
+#define A1	89
+#define NA	90
+#define ADS	91
+#define BHE	92
+#define BLE	93
+#define WR	94
+#define RD	95
+#define BS8	96
+
+#define READY	97
+#define WRD	98
+#define DC	99
+#define MIO	100
+
+

@@ -1,0 +1,15 @@
+Certain files need to be removed from a development system before an SD card image is prepared for customer use.
+
+The entire "hats" folder should be deleted. 
+This will prevent customers from accidentally corrupting the hat EEPROM contents
+
+All files exept for the executable "jtag" and jtag.ini should be deleted from the jtag folder. 
+This will prevent the customer from making unwanted changes to the jtag application.
+(ensure new source files are backed-up/returned to source control before deleting!)
+
+2021-08-02 developemnt files have now been moved to ~/jtagdev
+
+~/jtagdev contains the development files and ~jtag is the release appication direcctory
+
+back-up/git the entire ~/jtagdev folder and then remove with rm -rf ~/jtagdev
+ 
