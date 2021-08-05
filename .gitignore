@@ -1,4 +1,5 @@
 jtagapp/jtag
 jtagapp/*.o
+jtagapp/*.save*
 jtaglib
 

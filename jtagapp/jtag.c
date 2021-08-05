@@ -71,8 +71,11 @@
 //#define BOARD_REV_1
 #define BOARD_REV_2
 
-// DJF DEBUG TO BE REMOVED
-#define DJF_DEBUG
+char paddleChar[8] = {'|', '/', '-', '\\', '|', '/', '-', '\\'};
+int paddleCharIndex = 0;
+
+//// DJF DEBUG TO BE REMOVED
+//#define DJF_DEBUG
 //#define DJF_ANALYSER // don't wait on display delays
 
 // DJF Note: 300  cycles appeared to work fine on Pi ZeroW
@@ -87,6 +90,10 @@ extern int cycles_to_wait;
 //char * display_type = "**** Unkwnown display type ****"; // will be parallel but may support i2c in futture
 int display_rows = 4;
 int display_cols = 20;
+
+int diagnostic_menu = 0;
+int debug_level = 0;
+int command_line_opt = 0;
 
 //#define ID_String_Length	32	// number of bits in JTAG ID string (either 386EX or M5)
 const word ID_String_Length = 32;
@@ -145,12 +152,20 @@ void JTAGMenu(void);
 void diagnosticsMenu(int thisDeviceType, int totalMemory);
 void settingsMenu(void);
 void showIPDetails(void);
+void showHostname(void);
 void checkDateTime(void);
+void configurationMenu(void);
 void checkSignature(int);
 void dumpMemory(int thisDeviceType, int totalMemory);
 void loadMemory(void);
 void notYetImplemented(void);
-
+void exportSettings();
+void importSettings();
+int File_Copy (char FileSource [], char FileDestination []);
+void askRebootNow(void);
+void promptForEnter(void);
+int askHowToProgressError(void);
+char getNextPaddleChar(void);
 
 //char menuTitle[20];
 char menuItems[MAX_MENU_ITEMS][20]; // array to hold up to 30 <MAX_MENU_ITEMS> rows of 20 characters for menu items
@@ -366,6 +381,20 @@ char getche(void)
    return getch_(1);
 }
 
+char getNextPaddleChar(void)
+{
+   if(paddleCharIndex <7)
+   {
+      paddleCharIndex++;
+   }
+   else
+   {
+      // start again
+      paddleCharIndex = 0;
+   }
+   return paddleChar[paddleCharIndex];
+}
+
 /**** Fucntion to get ID string from the Intel 386EX chip ****/
 
 void Get_JTAG_Device_ID(void)
@@ -417,17 +446,20 @@ void Get_JTAG_Device_ID(void)
 //         return;
 //      }
       lcdClear(lcdHandle);
-#ifdef DJF_DEBUG
-      if(exitToCommandLine())
+//#ifdef DJF_DEBUG
+      if(command_line_opt != 0)
       {
-         lcdClear(lcdHandle);
-         lcdPosition(lcdHandle, 0, 0);
-         lcdPuts(lcdHandle, "Application");
-         lcdPosition(lcdHandle, 0, 1);
-         lcdPuts(lcdHandle, "   Terminated");
-         exit(0);
+         if(exitToCommandLine())
+         {
+            lcdClear(lcdHandle);
+            lcdPosition(lcdHandle, 0, 0);
+            lcdPuts(lcdHandle, "Application");
+            lcdPosition(lcdHandle, 0, 1);
+            lcdPuts(lcdHandle, "   Terminated");
+            exit(0);
+         }
       }
-#endif
+//#endif
       bad_id();
       finished();
    }
@@ -564,7 +596,7 @@ int main (int argc, char *argv[])
    // variables for ini file processing
    //
    const char * custname = "Customer Name Is Not Known";
-   ini_t * jtag_config = ini_load("jtag.ini");
+   ini_t * jtag_config = ini_load("/home/pi/jtag/jtag.ini");
 
    if(jtag_config != NULL)
    {
@@ -575,17 +607,36 @@ int main (int argc, char *argv[])
       ini_sget(jtag_config, "display", "rows", "%d", &display_rows);
       ini_sget(jtag_config, "display", "columns", "%d", &display_cols);
 
-       if(display_cols > 20)
-       {
-          // restrict to 20 columns
-          // displays are normally 2x16, 4x16 or 4x20
-          display_cols = 20;
-       }
+      if(display_cols > 20)
+      {
+         // restrict to 20 columns
+         // displays are normally 2x16, 4x16 or 4x20
+         display_cols = 20;
+      }
+
+      // handle special settigns for Flowbird and development use only
+      if(!ini_sget(jtag_config, "special_settings", "diagnostics", "%d", &diagnostic_menu))
+      {
+         diagnostic_menu = 0;
+      }
+      if(!ini_sget(jtag_config, "special_settings", "debug_level", "%d", &debug_level))
+      {
+         debug_level = 0;
+      }
+      if(!ini_sget(jtag_config, "special_settings", "command_line", "%d", &command_line_opt))
+      {
+         command_line_opt = 0;
+      }
+
       // this must be called after everything is finished with 
       // as it invalidates all string pointers returned by the library
-//      ini_free(jtag_config);
-// DJF DEBUG TO BE REMOVED
-printf("\nini file found, customer name is %s and cycles_to_wait is %d\n", custname, cycles_to_wait);
+      //ini_free(jtag_config);
+
+      if(debug_level > 0)
+      {
+         printf("\nini file found, customer name is %s and cycles_to_wait is %d\n", custname, cycles_to_wait);
+         printf("diags = %d, debug = %d, command line opt = %d\n", diagnostic_menu, debug_level, command_line_opt);
+      }
    }
    else
    {
@@ -593,6 +644,9 @@ printf("\nini file found, customer name is %s and cycles_to_wait is %d\n", custn
       cycles_to_wait = 1000;
       display_rows = 4;
       display_cols = 20;
+      diagnostic_menu = 0;
+      debug_level = 0;
+      command_line_opt = 0;
    }
 
    fp = fopen("/proc/device-tree/model", "r"); 
@@ -729,7 +783,7 @@ debug = 5;
    // configure he JTAG GPIO pins
    configureGPIO();
 
-   printf("Power TGX device now and press select on JTAG device\n");
+   //printf("Power TGX device now and press select on JTAG device\n");
 
    // 2021-05-18 DJF - new menu structure
    /*
@@ -781,6 +835,14 @@ void retest_signature(int deviceType)
       lcdPuts(lcdHandle, "...is still correct");
    }
    printf("Signature bytes read 0x%04X%04X\n", theSignatureBlock.theSignature[0], theSignatureBlock.theSignature[1]);
+   lcdPosition(lcdHandle, 0, display_rows - 1);
+   lcdPuts(lcdHandle, "...Press Select...");
+   waitForEnter();
+}
+
+void promptForEnter()
+{
+   // puts prompt to pres enter/select on last row
    lcdPosition(lcdHandle, 0, display_rows - 1);
    lcdPuts(lcdHandle, "...Press Select...");
    waitForEnter();
@@ -985,14 +1047,14 @@ int selectAction(void)
    sprintf(menuItems[menuItemIndex++], "%-19s", "shutdown");
    sprintf(menuItems[menuItemIndex++], "%-19s", "Display IP address");
    sprintf(menuItems[menuItemIndex++], "%-19s", "Check Date & Time");
-// DJF DEBUG TO BE REMOVED - will not be exit to command line in final version
-//#ifndef DJF_DEBUG
-   //theSelectedAction = select_menu_item(6, menuItems, "Select Action:");
-//#else
-#ifdef DJF_DEBUG
-   sprintf(menuItems[menuItemIndex++], "%-19s", "Exit to CMD line");
+
+//#ifdef DJF_DEBUG
+   if(command_line_opt != 0)
+   {
+      sprintf(menuItems[menuItemIndex++], "%-19s", "Exit to CMD line");
+   }
    //theSelectedAction = select_menu_item(7, menuItems, "Select Action:");
-#endif
+//#endif
 
    theSelectedAction = select_menu_item(menuItemIndex, menuItems, "Select Action:");
    //printf("DEBUG: Selected action is %d\n", selectedItem);
@@ -1823,9 +1885,12 @@ void topLevelMenu()
       sprintf(menuItems[numberOfItems++], "%-19s", "Settings");
       sprintf(menuItems[numberOfItems++], "%-19s", "Reboot");
       sprintf(menuItems[numberOfItems++], "%-19s", "Shutdown");
-#ifdef  DJF_DEBUG
-      sprintf(menuItems[numberOfItems++], "%-19s", "Exit to CMD line");
-#endif // DJF_DEBUG
+//#ifdef  DJF_DEBUG
+      if(command_line_opt != 0)
+      {
+         sprintf(menuItems[numberOfItems++], "%-19s", "Exit to CMD line");
+      }
+//#endif // DJF_DEBUG
 
       switch(select_menu_item(numberOfItems, menuItems, "Main Menu"))
       {
@@ -1845,7 +1910,7 @@ void topLevelMenu()
             running = false;
             break;
          default:
-            // just go aroudn again - shouldn't happen
+            // just go around again - shouldn't happen
             break;
       } // end of switch
    } // end while running loop
@@ -1860,7 +1925,9 @@ void settingsMenu()
    {
       numberOfItems = 0;
       sprintf(menuItems[numberOfItems++], "%-19s", "Display IP Address");
+      sprintf(menuItems[numberOfItems++], "%-19s", "Display Hostname");
       sprintf(menuItems[numberOfItems++], "%-19s", "Check Date & Time");
+      sprintf(menuItems[numberOfItems++], "%-19s", "Configuration");
       sprintf(menuItems[numberOfItems++], "%-19s", "[return]");
       switch(select_menu_item(numberOfItems, menuItems, "Settings"))
       {
@@ -1869,10 +1936,18 @@ void settingsMenu()
             showIPDetails();
             break;
          case 1:
+            // show the current IP settings
+            showHostname();
+            break;
+         case 2:
             // shpw the current date and time
             checkDateTime();
             break;
-         case 2:
+         case 3:
+            // shpw the current date and time
+            configurationMenu();
+            break;
+         case 4:
             // return to previous menu
             running = false;
             break;
@@ -1943,6 +2018,133 @@ void showIPDetails()
    waitForEnter();
 }
 
+void showHostname()
+{
+   char hostname[display_cols];
+
+
+   lcdClear(lcdHandle);
+   lcdPosition(lcdHandle, 0, 0);
+   lcdPuts(lcdHandle, "Hostname:");
+   lcdPosition(lcdHandle, 0, 1);
+   if(gethostname(hostname, display_cols) == 0)
+   {
+      lcdPrintf(lcdHandle, "%s", hostname);
+      lcdPosition(lcdHandle, 0, 2);
+      lcdPrintf(lcdHandle, "%s.local", hostname);
+   }
+   else
+   {
+      lcdPuts(lcdHandle, "[unknown!]");
+   }
+   lcdPosition(lcdHandle, 0, display_rows - 1);
+   lcdPuts(lcdHandle, " ...Press SELECT...");
+   waitForEnter();
+}
+
+void configurationMenu()
+{
+   int numberOfItems = 0;
+   bool running = true;
+
+   while (running)
+   {
+      numberOfItems = 0;
+      sprintf(menuItems[numberOfItems++], "%-19s", "Export settings");
+      sprintf(menuItems[numberOfItems++], "%-19s", "Import settings");
+      sprintf(menuItems[numberOfItems++], "%-19s", "[return]");
+      switch(select_menu_item(numberOfItems, menuItems, "Settings"))
+      {
+         case 0:
+            // copy the live jtag.ini file to US drive
+            exportSettings();
+            break;
+         case 1:
+            // update live jtag.in with file on USB drive
+            importSettings();
+            break;
+         case 2:
+         default:
+            // just return to previous menu
+            running = false;
+            break;
+      } // end of switch
+   } // end of while running loop
+}
+
+void exportSettings()
+{
+   File_Copy("/home/pi/jtag/jtag.ini", "/home/pi/jtagdisk/jtag.ini");
+}
+
+void importSettings()
+{
+   if(File_Copy("/home/pi/jtagdisk/jtag.ini", "/home/pi/jtag/jtag.ini") == 0)
+   {
+      // ask user whether to reboot to use new settings
+      askRebootNow();
+   }
+}
+
+int File_Copy (char FileSource [], char FileDestination [])
+{
+   /*
+    *  Function return value meanings
+    * -1 cannot open source file 
+    * -2 cannot open destination file
+    * 0 Success
+    */
+   int   c;
+   FILE *stream_R;
+   FILE *stream_W; 
+
+   stream_R = fopen (FileSource, "r");
+   if (stream_R == NULL)
+   {
+      return -1;
+   }
+
+   stream_W = fopen (FileDestination, "w");   //create and write to file
+   if (stream_W == NULL)
+   {
+        fclose (stream_R);
+        return -2;
+   }
+   while ((c = fgetc(stream_R)) != EOF)
+   {
+      fputc (c, stream_W);
+   }
+   fclose (stream_R);
+   fclose (stream_W);
+
+   return 0;
+}
+
+void askRebootNow()
+{
+   int numberOfItems = 0;
+   bool running = true;
+
+   while (running)
+   {
+      numberOfItems = 0;
+      sprintf(menuItems[numberOfItems++], "%-19s", "now");
+      sprintf(menuItems[numberOfItems++], "%-19s", "later");
+      switch(select_menu_item(numberOfItems, menuItems, "Reboot Required:"))
+      {
+         case 0:
+            // reboot now
+            reboot_system();
+            break;
+         case 1:
+         default:
+            // just return to previous menu
+            running = false;
+            break;
+      } // end of switch
+   } // end of while running loop
+}
+
 void JTAGMenu()
 {
    int thisDeviceType;
@@ -1951,6 +2153,8 @@ void JTAGMenu()
    bool running = true;
 
    // connect to the device
+   printf("Power TGX device now and press select on JTAG device\n");
+
    lcdClear(lcdHandle);
    lcdPosition (lcdHandle, 0, 0); lcdPuts (lcdHandle, "Power TGX or SCV and");
    lcdPosition (lcdHandle, 0, 1); lcdPuts (lcdHandle, "    press SELECT    ");
@@ -2020,7 +2224,10 @@ printf("FLASH_START is now set to 0x%08lX\n", FLASH_START);
       sprintf(menuItems[numberOfItems++], "%-19s", "Test for signature");
       sprintf(menuItems[numberOfItems++], "%-19s", "Dump to file");
       sprintf(menuItems[numberOfItems++], "%-19s", "Load memory");
-      sprintf(menuItems[numberOfItems++], "%-19s", "Diagnostics");
+      if(diagnostic_menu != 0)
+      {
+         sprintf(menuItems[numberOfItems++], "%-19s", "Diagnostics");
+      }
       sprintf(menuItems[numberOfItems++], "%-19s", "[return]");
       switch(select_menu_item(numberOfItems, menuItems, "Select Action:"))
       {
@@ -2034,7 +2241,27 @@ printf("FLASH_START is now set to 0x%08lX\n", FLASH_START);
             loadMemory();
             break;
          case 3:
-            diagnosticsMenu(thisDeviceType, totalMemory);
+            if(diagnostic_menu != 0)
+            {
+               diagnosticsMenu(thisDeviceType, totalMemory);
+            }
+            else
+            {
+              // release the device and return to previous menu
+              printf("\nReturning control to 386EX CPU.\n");
+              printf("Calling Restore_Idle()\n");
+              //Restore_Idle();		// Let go of the processor...
+              lcdClear(lcdHandle);
+              lcdPosition(lcdHandle, 0, 0);
+              lcdPuts(lcdHandle, "Calling Restore");
+              lcdPosition(lcdHandle, 0, 1);
+              lcdPuts(lcdHandle, "Idle...");
+              Restore_Idle();
+              delay(2000); // show message briefly
+              lcdClear(lcdHandle);
+
+              running = false;
+            }
             break;
          case 4:
             // release the device and return to previous menu
@@ -2076,7 +2303,12 @@ void diagnosticsMenu(int thisDeviceType, int totalMemory)
    unsigned int check_data = 0;
    unsigned int testValues[4] = {0x0000, 0xFFFF, 0xAAAA, 0x5555};
    unsigned int testAddress = 0;
+   unsigned int startAddress, endAddress = 0;
    int index = 0;
+   bool bIgnore = FALSE;
+   bool bManageError = TRUE;
+   bool bContinue = TRUE;
+   bool bQuitDiagnostics = FALSE;
 
    //notYetImplemented();
 
@@ -2122,25 +2354,94 @@ as the dump just uses RAM_Read and load has only used FLASH_Write
 
    for(index = 0; index < 4; index++)
    {
+      bManageError = TRUE;
+      bIgnore = FALSE;
       printf("Writing 0x%04X to address 0x%08X.....", testValues[index], testAddress);
 
       lcdClear(lcdHandle);
       lcdPosition(lcdHandle, 0, 0);
       lcdPrintf(lcdHandle, "Wr: 0x%04X to Addr %X", testValues[index], testAddress);
-      RAM_Write(PinState, testValues[index], testAddress);
+      /*
+       * 2021-08-03 DJF Note: this was passing address and data in the wrong order
+       */
+      RAM_Write(PinState, testAddress, testValues[index]);
 
       printf("reading.......");
       //check_data = RAM_Read(PinState, 0);
       check_data = Memory_Read(PinState, testAddress, thisDeviceType);
       lcdPosition(lcdHandle, 0, 1);
       lcdPrintf(lcdHandle, "Rd: 0x%04X fr Addr %X", check_data, testAddress);
-      if(check_data != (unsigned int)testValues[index])
+
+      if((check_data != (unsigned int)testValues[index]) && (bIgnore == FALSE))
       {
          printf("\n***ERROR!*** ");
-         printf("Wrote 0x%04X, read 0x%04X.\n\n", testValues[index], check_data);
+         printf("address 0x%08X: Wrote 0x%04X, read 0x%04X.\n\n", testAddress, testValues[index], check_data);
+         printf("if the previous tests were OK, there is probably a short or open on the \naddress bus.\n");
+         printf("\nSelect 'scope loop, ignore error, exit test or exist diagnostics\n");
          lcdPosition(lcdHandle, 0, 2);
          lcdPuts(lcdHandle, " ***ERROR!*** ");
-         waitForEnter();
+         promptForEnter();
+
+         //waitForEnter();
+         while(bManageError && !bIgnore)
+         {
+            switch(askHowToProgressError())
+            {
+               case 0:
+                  // run the scope loop
+                  bIgnore = FALSE;
+                  bContinue = TRUE;
+
+                  lcdClear(lcdHandle);
+                  lcdPosition(lcdHandle, 0, 0);
+                  lcdPuts(lcdHandle, "'scope loop active");
+                  lcdPosition(lcdHandle, 0, 1);
+                  lcdPrintf(lcdHandle, "Wr: 0x%04X to Addr %X", testValues[index], testAddress);
+                  lcdPosition(lcdHandle, 0, display_rows - 1);
+                  lcdPuts(lcdHandle, "Press Select to end");
+                  paddleCharIndex = 0;
+
+//                  // wait for the button to be released
+//                  while(digitalRead(AF_SELECT) == HIGH)
+//                  {
+//printf("DJF DEBUG : Waiting for SELECT release\n");
+//                     // just wait
+//                  }
+
+                  while(bContinue)
+                  {
+                     RAM_Write(PinState, testAddress, testValues[index]);
+                     check_data = Memory_Read(PinState, testAddress, thisDeviceType);
+
+                     lcdPosition(lcdHandle, 0, display_rows - 2);
+                     lcdPrintf(lcdHandle, "%c", getNextPaddleChar());
+                     delay(50); // just to stop the paddle character blur on display
+
+                     // See if user is ready to stop this loop
+                     if(digitalRead (AF_SELECT) == LOW)	// check for push
+                     {
+                        bContinue = FALSE;
+                     }
+                  } // end of while continue 'scope loop
+                  break;
+               case 1:
+                  // ignore this error and other errors in this test phase
+                  bIgnore = TRUE;
+                  break;
+               case 2:
+               //default:
+                  // quit this test
+                  //index = 4;
+                  bManageError = FALSE;
+                  break;
+               case 3:
+               default:
+                  // Quit diagnostic tests
+                  bManageError = FALSE;
+                  bQuitDiagnostics = TRUE;
+                  index = 4; // jump outof this cycle
+            } // end of switch
+         } // end while bContinue
       }
       else
       {
@@ -2151,10 +2452,76 @@ as the dump just uses RAM_Read and load has only used FLASH_Write
       }
    }
 
+   delay(500);
+
+
+   if(bQuitDiagnostics)
+   {
+      return;
+   }
+
    printf("\nTesting first RAM block...................\n");
-// DJF To Do
-   waitForEnter();
-// DJF DEBUG END
+
+   lcdClear(lcdHandle);
+   lcdPosition(lcdHandle, 0, 0);
+   lcdPuts(lcdHandle, "Test RAM addr 0..FF");
+   delay(1000);
+
+   startAddress = 0;
+   endAddress = 0xFF;
+
+   for(index = 0; index < 4; index++)
+   {
+      lcdClear(lcdHandle);
+
+      printf("Writing 0x%04X to address 0x%08X to 0x%08X\n",testValues[index], startAddress, endAddress);
+
+      for(testAddress = startAddress; testAddress < endAddress; testAddress += 2)
+      {
+//         printf("\rWriting 0x%04X to address 0x%08X.....", testValues[index], testAddress);
+
+         lcdPosition(lcdHandle, 0, 0);
+         lcdPrintf(lcdHandle, "Wr:0x%04X Addr %X", testValues[index], testAddress);
+
+         RAM_Write(PinState, testAddress, testValues[index]);
+
+//         printf("reading.......");
+         check_data = Memory_Read(PinState, testAddress, thisDeviceType);
+         lcdPosition(lcdHandle, 0, 1);
+         lcdPrintf(lcdHandle, "Rd:0x%04X Addr %X", check_data, testAddress);
+         if(check_data != (unsigned int)testValues[index])
+         {
+            printf("\n***ERROR!*** ");
+            printf("Wrote 0x%04X, read 0x%04X.\n\n", testValues[index], check_data);
+            lcdPosition(lcdHandle, 0, 2);
+            lcdPuts(lcdHandle, " ***ERROR!*** ");
+            waitForEnter();
+            // stop testing now
+            testAddress = 0xFF;
+            index = 4;
+         }
+//         else
+//         {
+//            printf("Okay\r");
+//            lcdPosition(lcdHandle, 0, 2);
+//            lcdPuts(lcdHandle, " read okay ");
+//            //delay(500);
+//         }
+      }
+   }
+
+   promptForEnter();
+}
+
+int askHowToProgressError()
+{
+   int numberOfItems = 0;
+   sprintf(menuItems[numberOfItems++], "%-19s", "Run 'scope loop");
+   sprintf(menuItems[numberOfItems++], "%-19s", "Ignore Error");
+   sprintf(menuItems[numberOfItems++], "%-19s", "Exit this test");
+   sprintf(menuItems[numberOfItems++], "%-19s", "Exit all tests");
+
+   return select_menu_item(numberOfItems, menuItems, "ERROR:Continue?...");
 }
 
 void checkSignature(int thisDeviceType)
