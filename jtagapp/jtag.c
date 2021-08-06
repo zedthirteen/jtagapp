@@ -2575,7 +2575,7 @@ void loadMemory()
    sprintf(filename, "/home/pi/jtagdisk/Image Files");
    if (selectFilename(filename))
    {
-      i(debug_level > 0)
+      if(debug_level > 0)
       {
          printf("\nDJF DEBUG: Filename is \"%s\"\n", filename);
       }
