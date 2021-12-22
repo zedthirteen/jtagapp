@@ -72,7 +72,16 @@
 #define BOARD_REV_2
 
 // DOS style revolving paddle
-char paddleChar[8] = { '|', '/', '-', '\\', '|', '/', '-', '\\' };
+//
+// DJF Note: display is Asian character set and has Yen symbol instead of backslash
+// use a bitmap for the backslash character in programmable area 0
+//
+// This should work for both European and Asian displays
+//
+unsigned char backslashChar[8] = {0, 0x10, 0x08, 0x04, 0x02, 0x01, 0, 0};
+//char paddleChar[8] = { '|', '/', '-', '\\', '|', '/', '-', '\\' };
+char paddleChar[8] = { '|', '/', '-', 0, '|', '/', '-', 0 };
+
 int paddleCharIndex = 0;
 
 // DJF DEBUG TO BE REMOVED
@@ -83,6 +92,9 @@ int paddleCharIndex = 0;
 // 1000 appears to be ok for ETM but failing on SCV - now okay obn SCV - was problem with WR line
 //
 //int cycles_to_wait = 1000; // will be updated from config ini file if available
+// Note: cycles_to_wait is nw derived from cpu max freq but can be overriden if value is
+//       present in ini file
+//
 extern int cycles_to_wait;
 
 // parameters for display size - will be read from config ini file
@@ -172,7 +184,6 @@ void display_menu_items(int numberOfItems, int firstItem, char(*menuItems)[20]);
 bool selectBoolean(char* title);
 
 int selectDeviceType(void);
-int selectAction(void);
 
 bool selectFilename(char *);
 
@@ -306,6 +317,10 @@ static void LCDSetup(void)
       fprintf(stderr, "lcdInit failed\n");
       exit(EXIT_FAILURE);
    }
+
+   // populate programmabel character index 0 with backslash bitmap
+   //
+   lcdCharDef(lcdHandle, 0,backslashChar);
 }
 
 /*
@@ -578,6 +593,9 @@ int main(int argc, char *argv[])
    int thumb;
    int debug = 0;
 
+   int cpu_max_freq;
+   int result = 0;
+
    char pi_model[128];
    FILE *fp;
 
@@ -586,10 +604,36 @@ int main(int argc, char *argv[])
    const char * custname = "Customer Name Is Not Known";
    ini_t * jtag_config = ini_load("/home/pi/jtag/jtag.ini");
 
+   // DJF Note: CPU appears to run at max freq when dump is in progess
+   //
+   // The JTAG puls width needs to be roughly 1us to work reliably.
+   // The following file access reads the maximum CPU frequency in
+   // KHz (I think? A 1.4GHz Pi 3B= returns 1,400,000).
+   // Divide this value by 1000 to get the number of cycles to wait for 1us
+   //
+   fp = fopen("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq", "r");
+   if (fp != NULL)
+   {
+      result = fscanf(fp, "%d", &cpu_max_freq);
+      fclose(fp);
+      if(result == 0)
+      {
+         // failed to get value. Set a safe default
+         // pi model A/A+ s only 700MHz
+         cpu_max_freq = 700000;
+      }
+   }
+
+   cycles_to_wait = cpu_max_freq / 1000; // this gives us 1us wait time
+
    if (jtag_config != NULL)
    {
       ini_sget(jtag_config, "settings", "customer_name", NULL, &custname);
-      ini_sget(jtag_config, "settings", "clock_timing", "%d", &cycles_to_wait);
+      // this will override CPU based setting from cpu_max_freq
+      if (!ini_sget(jtag_config, "settings", "clock_timing", "%d", &cycles_to_wait))
+      {
+         cycles_to_wait = cpu_max_freq / 1000;
+      }
 
       //ini_sget(jtag_config, "display", "type", NULL, &display_type);
       ini_sget(jtag_config, "display", "rows", "%d", &display_rows);
@@ -624,12 +668,13 @@ int main(int argc, char *argv[])
       {
          printf("\nini file found, customer name is %s and cycles_to_wait is %d\n", custname, cycles_to_wait);
          printf("diags = %d, debug = %d, command line opt = %d\n", diagnostic_menu, debug_level, command_line_opt);
-      }
+         printf("CPU Max Frequncy = %d\r\n", cpu_max_freq);
+     }
    }
    else
    {
       // use defaults
-      cycles_to_wait = 1000;
+      //cycles_to_wait = 1000;
       display_rows = 4;
       display_cols = 20;
       diagnostic_menu = 0;
@@ -665,6 +710,8 @@ int main(int argc, char *argv[])
    mcp23017Setup(AF_BASE, 0x20);
 
    LCDSetup();
+
+
    //system("sudo mount -t vfat -o uid=pi,gid=pi /dev/sda1 /home/pi/jtagdisk");
 
    thumb = system("ls /dev/sda");
@@ -978,6 +1025,7 @@ unsigned long int selectMaximumMemory(int thisDeviceType)
    }
    return maximum;
 }
+
 void show_dump_stats(time_t start_time, time_t end_time)
 {
    time_t duration;
@@ -1018,30 +1066,6 @@ void show_dump_stats(time_t start_time, time_t end_time)
    lcdPuts(lcdHandle, "...Press Select...");
 
    waitForEnter();
-}
-
-int selectAction(void)
-{
-   int theSelectedAction = CHECK_SIGNATURE; // safe default
-
-   // populate menu items
-   menuItemIndex = 0;
-   sprintf(menuItems[menuItemIndex++], "%-19s", "Test for signature");
-   sprintf(menuItems[menuItemIndex++], "%-19s", "Dump to file");
-   sprintf(menuItems[menuItemIndex++], "%-19s", "Load Memory");
-   sprintf(menuItems[menuItemIndex++], "%-19s", "reboot");
-   sprintf(menuItems[menuItemIndex++], "%-19s", "shutdown");
-   sprintf(menuItems[menuItemIndex++], "%-19s", "Display IP address");
-   sprintf(menuItems[menuItemIndex++], "%-19s", "Check Date & Time");
-
-   if (command_line_opt != 0)
-   {
-      sprintf(menuItems[menuItemIndex++], "%-19s", "Exit to CMD line");
-   }
-
-   theSelectedAction = select_menu_item(menuItemIndex, menuItems, "Select Action:");
-   //printf("DEBUG: Selected action is %d\n", selectedItem);
-   return theSelectedAction;
 }
 
 struct signatureBlockType testForSignature(unsigned long int StartAddress, int dev_type)
@@ -1228,7 +1252,7 @@ void dump_to_file(unsigned long int start, unsigned long int end, int dev_type, 
       dataByte[1] = (data & 0xFF00) / 0x100; // MSB
 
       if ((fwrite(&dataByte[1], sizeof(unsigned char), 1, dataFile) != 1) ||
-         (fwrite(&dataByte[0], sizeof(unsigned char), 1, dataFile) != 1))
+          (fwrite(&dataByte[0], sizeof(unsigned char), 1, dataFile) != 1))
       {
          printf("Error writing to file\n");
       }
@@ -1244,7 +1268,37 @@ void dump_to_file(unsigned long int start, unsigned long int end, int dev_type, 
          lcdPosition(lcdHandle, 0, display_rows - 1);
          lcdPuts(lcdHandle, progress);
       }
+      // see if the user wants to cancel - just now an again
+      if((bytes_read & 0xF) == 0)
+      {
+         if (digitalRead(AF_SELECT) == LOW)
+         {
+            printf("\nCancel button pressed\r\n");
+            lcdClear(lcdHandle);
+            if(selectBoolean("Cancel dump?"))
+            {
+               address = end;
+            }
+            else
+            {
+               // user did not intend to cancel
+               // reset the display and continue
+               for (index = 0; index < 4; index++)
+               {
+                  lcdPosition(lcdHandle, 0, index);
+                  lcdPuts(lcdHandle, "                    "); // clear line on display
+               }
 
+               lcdPosition(lcdHandle, 0, 0);
+               lcdPuts(lcdHandle, "dumping mem to file");
+               sprintf(bytes_read_string, "%ldKB read", bytes_read / 1024);
+               lcdPosition(lcdHandle, 0, 1);
+               lcdPuts(lcdHandle, bytes_read_string);
+               lcdPosition(lcdHandle, 0, display_rows - 1);
+               lcdPuts(lcdHandle, progress);
+            }
+         }
+      }
    }
    fclose(dataFile);
    printf("\nBinary file %s has been created (or overwritten!)\n", filename);
@@ -1264,20 +1318,29 @@ struct addressRangeType selectAddressRange(unsigned long int max_address)
    {
       sprintf(menuItems[0], "%-19s", "Full Memory Dump");
       sprintf(menuItems[1], "%-19s", "Custom Addr. Range");
-      selectedItem = select_menu_item(2, menuItems, "Select Addr. Range:");
+      sprintf(menuItems[2], "%-19s", "[return]");
+      selectedItem = select_menu_item(3, menuItems, "Select Addr. Range:");
 
       switch (selectedItem)
       {
       case 0:
          stAddressRange.startAddress = 0;
          stAddressRange.endAddress = max_address;
+         addressRangeConfirmed = confirmAddressRange(stAddressRange);
          break;
       case 1:
          stAddressRange.startAddress = selectHexAddress("Start offset(HEX):", 0);
          stAddressRange.endAddress = selectHexAddress("End offset(HEX):", max_address);
+         addressRangeConfirmed = confirmAddressRange(stAddressRange);
          break;
+
+      case 2:
+         // set start address and end address the same to cancel dump
+         stAddressRange.startAddress = 0;
+         stAddressRange.endAddress = 0;
+         addressRangeConfirmed = true; // exit while loop
+
       }
-      addressRangeConfirmed = confirmAddressRange(stAddressRange);
    } // while not confirmed address range
 
    return stAddressRange;
@@ -2150,7 +2213,7 @@ void JTAGMenu()
    Send_Instruction_IN(strlen(SAMPLE), SAMPLE); // SAMPLE/preload to initialise BSR
    Send_Instruction_IN(strlen(EXTEST), EXTEST); // Configure for external test
 
-   // DJF To Do wibble - what if incorrect?
+   // DJF To Do  - what if incorrect?
 
    thisDeviceType = selectDeviceType();
 
@@ -2270,7 +2333,7 @@ void diagnosticsMenu(int thisDeviceType, int totalMemory)
 {
    unsigned int check_data = 0;
    unsigned int testValues[4] = { 0x0000, 0xFFFF, 0xAAAA, 0x5555 };
-   unsigned int testAddress = 0;
+   unsigned int testAddress, scopeTestAddress = 0;
    unsigned int startAddress, endAddress = 0;
    int index = 0;
    bool bIgnore = FALSE;
@@ -2361,7 +2424,7 @@ void diagnosticsMenu(int thisDeviceType, int totalMemory)
                   check_data = Memory_Read(PinState, testAddress, thisDeviceType);
 
                   lcdPosition(lcdHandle, 0, display_rows - 2);
-                  lcdPrintf(lcdHandle, "%c", getNextPaddleChar());
+                  lcdPutchar(lcdHandle, getNextPaddleChar());
                   delay(50); // just to stop the paddle character blur on display
 
                   // See if user is ready to stop this loop
@@ -2386,6 +2449,7 @@ void diagnosticsMenu(int thisDeviceType, int totalMemory)
                bManageError = FALSE;
                bQuitDiagnostics = TRUE;
                index = 4; // jump outof this cycle
+               break;
             } // end of switch
          } // end while bContinue
       }
@@ -2419,38 +2483,130 @@ void diagnosticsMenu(int thisDeviceType, int totalMemory)
 
    for (index = 0; index < 4; index++)
    {
+      bManageError = TRUE;
+      bIgnore = FALSE;
       lcdClear(lcdHandle);
 
       printf("Writing 0x%04X to address 0x%08X to 0x%08X\n", testValues[index], startAddress, endAddress);
 
       for (testAddress = startAddress; testAddress < endAddress; testAddress += 2)
       {
+         // write to all addresses in block
          lcdPosition(lcdHandle, 0, 0);
          lcdPrintf(lcdHandle, "Wr:0x%04X Addr %X", testValues[index], testAddress);
 
-         RAM_Write(PinState, testAddress, testValues[index]);
+         RAM_Write(PinState, testAddress, testValues[index]); 
+      }
 
+      for (testAddress = startAddress; testAddress < endAddress; testAddress += 2)
+      {
+         // read back from all addresses
          check_data = Memory_Read(PinState, testAddress, thisDeviceType);
          lcdPosition(lcdHandle, 0, 1);
          lcdPrintf(lcdHandle, "Rd:0x%04X Addr %X", check_data, testAddress);
-         if (check_data != (unsigned int)testValues[index])
+         if ((check_data != (unsigned int)testValues[index]) && (bIgnore = FALSE))
          {
-            printf("\n***ERROR!*** ");
-            printf("Wrote 0x%04X, read 0x%04X.\n\n", testValues[index], check_data);
+            printf("\n***ERROR at  ");
+            printf("address 0x%08X: Wrote 0x%04X, read 0x%04X.\n\n", testAddress, testValues[index], check_data);
+            printf("If the previous tests were OK, there is probably a short or open on the \naddress bus.\n");
+            printf("\nSelect 'scope loop, ignore error, exit test or exit diagnostics\n");
             lcdPosition(lcdHandle, 0, 2);
             lcdPuts(lcdHandle, " ***ERROR!*** ");
-            waitForEnter();
+            promptForEnter();
+            while (bManageError && !bIgnore)
+            {
+               switch (askHowToProgressError())
+               {
+                  case 0:
+                     // run the 'scope loop
+                     bIgnore = FALSE;
+                     bContinue = TRUE;
+
+                     lcdClear(lcdHandle);
+                     lcdPosition(lcdHandle, 0, 0);
+                     lcdPuts(lcdHandle, "'scope loop active");
+                     lcdPosition(lcdHandle, 0, 1);
+                     lcdPrintf(lcdHandle, "Wr: 0x%04X to Addr %x", testValues[index], testAddress);
+                     lcdPosition(lcdHandle, 0, display_rows - 1);
+                     lcdPuts(lcdHandle, "Press Select to end");
+                     paddleCharIndex = 0;
+                     lcdPosition(lcdHandle, 0, display_rows - 2);
+                     printf("\n\n-----Starting 'scope loop. Addresses 0x%08X to 0x%08X are set to 0x%04X, then ",
+                            startAddress, endAddress, testValues[index]);
+                     printf("-----read back. Check that all the data lines are 0x%04X and the lower 8\n", testValues[index]);
+                     printf("-----address lines are activ.\n\nPress Select to leave this loop\n");
+                     while (bContinue)
+                     {
+                        for(scopeTestAddress = startAddress; scopeTestAddress < endAddress; scopeTestAddress++)
+                        {
+                           RAM_Write(PinState, scopeTestAddress, testValues[index]);
+                           check_data = Memory_Read(PinState, scopeTestAddress, thisDeviceType);
+                        }
+                        lcdPosition(lcdHandle, 0, display_rows - 2);
+                        lcdPutchar(lcdHandle, getNextPaddleChar());
+                        delay(50); // just to stop the paddle character blur on the display
+
+                        // see if user is ready to stop this loop
+                        if(digitalRead(AF_SELECT) == LOW) // check for push
+                        {
+                           bContinue = FALSE;
+                        }
+                     } // end while continue 'scope loop
+                     break;
+                  case 1:
+                     // ignore this error and other errors in this test phase
+                     bIgnore = TRUE;
+                     break;
+                  case 2:
+                     // quit this test
+                     bManageError = FALSE;
+                     break;
+                  case 3:
+                  default:
+                     // Quite diagnostic tests
+                     bManageError = FALSE;
+                     bQuitDiagnostics = TRUE;
+                     index = 4; // jump out of this cycle
+                     break;
+
+               } // end of switch
+            } // end of while manage error
             // stop testing now
             testAddress = 0xFF;
             index = 4;
          }
-         //         else
-         //         {
-         //            printf("Okay\r");
-         //            lcdPosition(lcdHandle, 0, 2);
-         //            lcdPuts(lcdHandle, " read okay ");
-         //            //delay(500);
-         //         }
+         else
+         {
+            printf("Okay\r");
+            lcdPosition(lcdHandle, 0, 2);
+            lcdPuts(lcdHandle, " read okay ");
+            delay(500);
+         }
+      }
+   }
+   delay(500);
+
+   if (bQuitDiagnostics)
+   {
+      return;
+   }
+
+   /**************************************************************************/
+
+   // Extended RAM tests
+
+   printf("\nRun extended RAM tests? ");
+   lcdClear(lcdHandle);
+   if(selectBoolean("Run ext.d RAM tests?"))
+   {
+      notYetImplemented();
+//DJF To do
+
+      delay(500);
+
+      if (bQuitDiagnostics)
+      {
+         return;
       }
    }
 
@@ -2505,62 +2661,68 @@ void dumpMemory(int thisDeviceType, int totalMemory)
    struct addressRangeType stAddressRange;
 
    stAddressRange = selectAddressRange(totalMemory);
-   start_time = time(NULL);
-   c_time_string = ctime(&start_time);
 
-   if (debug_level > 0)
+   // return if start and end adddess are the same (cancel dump)
+   //
+   if(stAddressRange.startAddress != stAddressRange.endAddress)
    {
-      printf("dump timing at %d cycles to wait\n", cycles_to_wait);
-      printf("dump starting at %s\n", c_time_string);
+      start_time = time(NULL);
+      c_time_string = ctime(&start_time);
+
+      if (debug_level > 0)
+      {
+         printf("dump timing at %d cycles to wait\n", cycles_to_wait);
+         printf("dump starting at %s\n", c_time_string);
+      }
+
+      ptm = localtime(&start_time);
+
+      switch (thisDeviceType)
+      {
+      case ETM_TGXtra:
+      case ETM_TGX:
+
+         if (debug_level > 0)
+         {
+            printf("ETM Range selected is 0x%08lX to 0x%08lX\n", stAddressRange.startAddress, stAddressRange.endAddress);
+         }
+
+         sprintf(filename, "%s/%04d%02d%02d_%02d%02d%02d_ETM_jtagdump.bin",
+            filepath,
+            ptm->tm_year + 1900,
+            ptm->tm_mon + 1,
+            ptm->tm_mday,
+            ptm->tm_hour,
+            ptm->tm_min,
+            ptm->tm_sec);
+
+         break;
+      case SCV:
+      default:
+         if (debug_level > 0)
+         {
+            printf("SCV Range selected is 0x%08lX to 0x%08lX\n", stAddressRange.startAddress, stAddressRange.endAddress);
+         }
+         sprintf(filename, "%s/%04d%02d%02d_%02d%02d%02d_SCV_jtagdump.bin",
+            filepath,
+            ptm->tm_year + 1900,
+            ptm->tm_mon + 1,
+            ptm->tm_mday,
+            ptm->tm_hour,
+            ptm->tm_min,
+            ptm->tm_sec);
+
+         break;
+      } // switch deviceType
+
+      dump_to_file(stAddressRange.startAddress, stAddressRange.endAddress, thisDeviceType, filename); // user selected range
+
+      end_time = time(NULL);
+
+      show_dump_stats(start_time, end_time);
+
+      retest_signature(thisDeviceType);
    }
-
-   ptm = localtime(&start_time);
-
-   switch (thisDeviceType)
-   {
-   case ETM_TGXtra:
-   case ETM_TGX:
-
-      if (debug_level > 0)
-      {
-         printf("ETM Range selected is 0x%08lX to 0x%08lX\n", stAddressRange.startAddress, stAddressRange.endAddress);
-      }
-
-      sprintf(filename, "%s/%04d%02d%02d_%02d%02d%02d_ETM_jtagdump.bin",
-         filepath,
-         ptm->tm_year + 1900,
-         ptm->tm_mon + 1,
-         ptm->tm_mday,
-         ptm->tm_hour,
-         ptm->tm_min,
-         ptm->tm_sec);
-
-      break;
-   case SCV:
-   default:
-      if (debug_level > 0)
-      {
-         printf("SCV Range selected is 0x%08lX to 0x%08lX\n", stAddressRange.startAddress, stAddressRange.endAddress);
-      }
-      sprintf(filename, "%s/%04d%02d%02d_%02d%02d%02d_SCV_jtagdump.bin",
-         filepath,
-         ptm->tm_year + 1900,
-         ptm->tm_mon + 1,
-         ptm->tm_mday,
-         ptm->tm_hour,
-         ptm->tm_min,
-         ptm->tm_sec);
-
-      break;
-   } // switch deviceType
-
-   dump_to_file(stAddressRange.startAddress, stAddressRange.endAddress, thisDeviceType, filename); // user selected range
-
-   end_time = time(NULL);
-
-   show_dump_stats(start_time, end_time);
-
-   retest_signature(thisDeviceType);
 }
 
 void loadMemory()
@@ -2568,6 +2730,7 @@ void loadMemory()
    char filename[512];
    bool bErase = FALSE;
    bool bVerify = FALSE;
+   bool bCancelLoad = FALSE;
    unsigned long int bytesProgrammed = 0; // need to know for verify read back
 
    lcdClear(lcdHandle);
@@ -2585,7 +2748,8 @@ void loadMemory()
       sprintf(menuItems[0], "%-19s", "TGXtra 0x03FFA000");
       sprintf(menuItems[1], "%-19s", "SCV    0x03FF8000");
       sprintf(menuItems[2], "%-19s", "Custom Offset");
-      switch (select_menu_item(3, menuItems, "Start Address Type?"))
+      sprintf(menuItems[3], "%-19s", "[return]");
+      switch (select_menu_item(4, menuItems, "Start Address Type?"))
       {
       case 0: // TGXtra
          data_start_address = 0x03FFA000;
@@ -2597,32 +2761,39 @@ void loadMemory()
       default: // Custom
          data_start_address = (unsigned long int)selectHexAddress("Start Offset(HEX):", FLASH_START);
          break;
+      case 3:
+         bCancelLoad = TRUE;
+         break;
       }
-      bErase = selectBoolean("Erase Flash?");
-      bVerify = selectBoolean("Verfify Data?");
-      if (bErase)
+
+      if(!bCancelLoad)
       {
-         lcdClear(lcdHandle);
-         lcdPosition(lcdHandle, 0, 0);
-         lcdPuts(lcdHandle, "Erasing Flash");
-         lcdPosition(lcdHandle, 0, 1);
-         lcdPuts(lcdHandle, "(about 15 secs)....");
-         Erase_Flash();
-         lcdClear(lcdHandle);
-         lcdPosition(lcdHandle, 0, 0);
-         lcdPuts(lcdHandle, "...Erase Done");
-      }
-      bytesProgrammed = Program_Flash_Data(filename, data_start_address, lcdHandle, display_rows, display_cols);
+         bErase = selectBoolean("Erase Flash?");
+         bVerify = selectBoolean("Verfify Data?");
+         if (bErase)
+         {
+            lcdClear(lcdHandle);
+            lcdPosition(lcdHandle, 0, 0);
+            lcdPuts(lcdHandle, "Erasing Flash");
+            lcdPosition(lcdHandle, 0, 1);
+            lcdPuts(lcdHandle, "(about 15 secs)....");
+            Erase_Flash();
+            lcdClear(lcdHandle);
+            lcdPosition(lcdHandle, 0, 0);
+            lcdPuts(lcdHandle, "...Erase Done");
+         }
+         bytesProgrammed = Program_Flash_Data(filename, data_start_address, lcdHandle, display_rows, display_cols);
 
-      // DJF To Do - check verify handling
-      if (bVerify)
-      {
-         // read back the data to file - show progress
+         // DJF To Do - check verify handling
+         if (bVerify)
+         {
+            // read back the data to file - show progress
 
-         // compare verification file with original - show progress
+            // compare verification file with original - show progress
 
-         // report results
-      }
+            // report results
+         }
+      } // end of if not cancel load
 
    }
    lcdClear(lcdHandle);
