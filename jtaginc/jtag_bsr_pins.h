@@ -1,7 +1,8 @@
 /*** Definitions of the JTAG BSR pins for sequence Intel 386EX CPU */
 /*** Note MIO shiftedout last */
 
-#define BSR_Length	202	// number of bits in JTAG BSR string. 101 x 2 (+1 for M5 "BYPASS")
+#define BSR_Length	202	// number of bits in JTAG BSR string. 101 x 2
+//#define BSR_Length     203	// number of bits in JTAG BSR string. 101 x 2 (+1 for M5 "BYPASS")
 
 #define D15	0
 #define D14	1
@@ -49,7 +50,6 @@
 #define P14	38
 #define P13	39
 #define P12	40
-
 #define P11	41
 #define P10	42
 #define FLT	43
@@ -106,10 +106,117 @@
 #define WR	94
 #define RD	95
 #define BS8	96
-
 #define READY	97
 #define WRD	98
 #define DC	99
 #define MIO	100
 
-
+/*
+#define M5_BYPASS 0
+#define D15	1
+#define D14	2
+#define D13	3
+#define D12	4
+#define D11	5
+#define D10	6
+#define D9	7
+#define D8	8
+#define D7	9
+#define D6	10
+#define D5	11
+#define D4	12
+#define D3	13
+#define D2	14
+#define D1	15
+#define D0	16
+#define LBA	17
+#define jCS6	18 // there is a CS6 in termios.h ?
+#define UCS	19
+#define P27	20
+#define P26	21
+#define P25	22
+#define DACK0	23
+#define P24	24
+#define CS4	24
+#define P23	25
+#define CS3	25
+#define P22	26
+#define CS2	26
+#define P21	27
+#define CS1	27
+#define P20	28
+#define CS0	28
+#define SMIACT	29
+#define DRQ1	30
+#define DRQ0	31
+#define WDTOUT	32
+#define EOP	33
+#define DACK1	34
+#define P17	35
+#define RESET	36
+#define P16	37
+#define P15	38
+#define P14	39
+#define P13	40
+#define P12	41
+#define P11	42
+#define P10	43
+#define FLT	44
+#define STXCLK	45
+#define INT7	46
+#define INT6	47
+#define INT5	48
+#define INT4	49
+#define TMRGATE2	50
+#define TMROUT2	51
+#define NMI	52
+#define PEREQ	53
+#define P37	54
+#define P36	55
+#define P35	56
+#define P34	57
+#define P33	58
+#define P32	59
+#define SSIOTX	60
+#define SSIORX	61
+#define SRXCLK	62
+#define P31	63
+#define P30	64
+#define SMI	65
+#define A25	66
+#define A24	67
+#define A23	68
+#define A22	69
+#define A21	70
+#define A20	71
+#define A19	72
+#define A18	73
+#define A17	74
+#define A16	75
+#define A15	76
+#define A14	77
+#define A13	78
+#define A12	79
+#define A11	80
+#define A10	81
+#define A9	82
+#define A8	83
+#define A7	84
+#define A6	85
+#define A5	86
+#define A4	87
+#define A3	88
+#define A2	89
+#define A1	90
+#define NA	91
+#define ADS	92
+#define BHE	93
+#define BLE	94
+#define WR	95
+#define RD	96
+#define BS8	97
+#define READY	98
+#define WRD	99
+#define DC	100
+#define MIO	101
+*/

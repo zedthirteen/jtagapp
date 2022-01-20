@@ -71,6 +71,8 @@
 //#define BOARD_REV_1
 #define BOARD_REV_2
 
+#define m1 0x0782B003
+
 // DOS style revolving paddle
 //
 // DJF Note: display is Asian character set and has Yen symbol instead of backslash
@@ -97,6 +99,8 @@ int paddleCharIndex = 0;
 //
 extern int cycles_to_wait;
 
+extern bool verbose_debug;
+
 // parameters for display size - will be read from config ini file
 //
 //char * display_type = "**** Unkwnown display type ****"; // will be parallel but may support i2c in future
@@ -107,6 +111,7 @@ int display_cols = 20;
 int diagnostic_menu = 0;
 int debug_level = 0;
 int command_line_opt = 0;
+int ignore_errors_opt = 0;
 
 const word ID_String_Length = 32;
 
@@ -127,6 +132,7 @@ char getch_(int echo);
 char getch(void);
 char getche(void);
 
+void Get_M5_Device_ID(void);
 void Get_JTAG_Device_ID(void);
 void Get_Board_Revision(int);
 
@@ -201,7 +207,7 @@ const unsigned short int expectedSignature[] = { 0xAA55, 0x5AA5 };
 word RX;                         // stores register data
 word new_word;                   // hold data to be written to flash
 word high_part;                  // temporary holder for upper part of word
-char PinState[BSR_Length];       // holds pin data to move in adn out
+char PinState[BSR_Length];       // holds pin data to move in and out
 char input_file[80];             // holds name of input file
 int c;                           // character being worked with
 char ch;                         // temporary character from keyboard
@@ -222,6 +228,14 @@ int SMM_Please;                  // TRUE if SMM read requested
 const int FLASH_START_1M[] = { 0x3F00000, // {TGXtra ETM, SCV, TGX ETM} FLASH_START is loaded one or the other of these
                                0x3F00000,
                                0x3F00000 };
+const int FLASH_START_BB = 0x3F00800;		// DJF Note: these should probably be new device types?
+const int FLASH_START_PP = 0x3F00800;
+
+const int SMM_START       = 0x3F800;
+const int SMM_TOP         = 0x3FFFF;
+const int SMM_FLASH_START = 0x38000;
+const int SMM_FLASH_TOP   = 0x38000 + 2047;
+
 // values.
 // FLASH_START_BB is only used for the original
 // "breadboard" non-graphics  PCB
@@ -237,13 +251,35 @@ void finished();
 // The commands are stored here as strings and converted to binary
 // as they are shifted out. Note: They are in bit reversed order.
 //
+// For example the INTEST instruction for the 386EX is 1001, so adding
+// the BYPASS instruction for the M5 (which is 111111) makes the
+// entire instruction sequence 11111101001 binary. The commands are stored
+// here as strings and converted to binary as they are shifted out.
+// NB They are in bit reversed order.
+/*
 char *BYPASS = "1111";     // Use BYPASS register in data path
 char *EXTEST = "0000";     // External test mode (i.e. test the board)
 char *SAMPLE = "1000";     // Sample/Preload instruction
 char *IDCODE = "0100";     // Read ID CODE from chip
 char *INTEST = "1001";     // On-chip system test (i.e. test the device)
 char *HIGHZ = "0001";      // Place the device in hi-z mode
+*/
+char *BYPASS = "1111111111";     // Use BYPASS register in data path
+char *EXTEST = "1111110000";     // External test mode (i.e. test the board)
+char *SAMPLE = "1111111000";     // Sample/Preload instruction
+char *IDCODE = "1111110100";     // Read ID CODE from chip
+char *INTEST = "1111111001";     // On-chip system test (i.e. test the device)
+char *HIGHZ = "1111110001";      // Place the device in hi-z mode
 
+/********* JTAG Commands for MACH5 192/120 ***************************/
+
+char *M5IDCODE = "1000001111";    // Device JTAG I.D. (Manuf,device,rev.)
+char *M5EXTEST = "0000001111";    // External (system) test
+char *M5BYPASS = "1111111111";    // Bypass both devices
+char *M5SAMPLE = "0100001111";    // Sample/preload
+char *M5HIGHZ  = "1000101111";    // Float pins
+
+//The last 4 "1"s are the 386EX instruction (BYPASS)
 
 // Defines for the Adafruit Pi LCD interface board
 
@@ -405,6 +441,46 @@ char getNextPaddleChar(void)
    return paddleChar[paddleCharIndex];
 }
 
+void Get_M5_Device_ID(void)
+{
+   const char   *p="01010101010101010101010101010101";     //dummy string
+   //const char *m="00000111100000101011000000000011";     //M5-192/120 code
+   //               0000                                     version number
+   //                   0111100000101011                     part identification
+   //                                   00000000001          company code
+   //                                              1         IDCODE present flag
+   //unsigned long int m1 = 0x0782B003;                    // The same in hex
+   // This is after it has been flipped.
+
+   char ID[ID_String_Length + 1];
+
+   strcpy(ID, p);                                          //Fill with dummy string
+   Send_Instruction_IN(strlen(M5IDCODE), M5IDCODE);        //Do not overwrite instr
+                                                           //because it resides in the
+                                                           //fixed string area.
+
+   //printf("%s\n",ID);
+   Send_Data(strlen(ID), ID);
+   //printf("%s\n",ID);
+   Flip_ID_String(strlen(ID), ID);                //make MSB first in array
+   M5_Device_ID = Parse_ID(ID);
+   printf("\nThe M5-192/120 Chip Identifier reads %08lX",M5_Device_ID);
+   if (M5_Device_ID != m1)
+   {
+      printf(" but it should be 0x0782B003.");
+      printf("\nCarry on anyway? ");
+      ch = getche();
+      if ((ch == 'y') || (ch == 'Y'))
+      {
+         printf("\nContinuing......  \n\n");
+         return;
+      }
+      bad_id();
+      finished();                        // Give up.
+   }
+   else printf(", which is correct.\n");
+}
+
 /**** Fucntion to get ID string from the Intel 386EX chip ****/
 
 void Get_JTAG_Device_ID(void)
@@ -446,25 +522,32 @@ void Get_JTAG_Device_ID(void)
       printf("\nThis ID is wrong so the data dump probably won't work.\n");
       //      printf("Carry on anyway? ");
       printf("Press Select to exit");
-      lcdPosition(lcdHandle, 0, display_rows - 1);
-      lcdPuts(lcdHandle, "Press Select to Exit");
-      waitForEnter();
-
-      lcdClear(lcdHandle);
-      if (command_line_opt != 0)
+      if(ignore_errors_opt == 0)
       {
-         if (exitToCommandLine())
+         lcdPosition(lcdHandle, 0, display_rows - 1);
+         lcdPuts(lcdHandle, "Press Select to Exit");
+         waitForEnter();
+
+         lcdClear(lcdHandle);
+         if (command_line_opt != 0)
          {
-            lcdClear(lcdHandle);
-            lcdPosition(lcdHandle, 0, 0);
-            lcdPuts(lcdHandle, "Application");
-            lcdPosition(lcdHandle, 0, 1);
-            lcdPuts(lcdHandle, "   Terminated");
-            exit(0);
+            if (exitToCommandLine())
+            {
+               lcdClear(lcdHandle);
+               lcdPosition(lcdHandle, 0, 0);
+               lcdPuts(lcdHandle, "Application");
+               lcdPosition(lcdHandle, 0, 1);
+               lcdPuts(lcdHandle, "   Terminated");
+               exit(0);
+            }
          }
+         bad_id();
+         finished();
       }
-      bad_id();
-      finished();
+      else
+      {
+         // just carry on
+      }
    }
 }
 
@@ -514,6 +597,7 @@ void Get_Board_Revision(int dev_type)
    Send_Instruction_IN(strlen(SAMPLE), SAMPLE); // SAMPLE/preload to initialise BSR
    Send_Instruction_IN(strlen(EXTEST), EXTEST); // Configure for external test
 
+   //printf("Reading board rev port at 0x%08X for device type %d\r\n", board_rev_port[dev_type], dev_type);
    board_rev = IO_Read(PinState, board_rev_port[dev_type], dev_type);
 
    // DJF Note: I suspect the two bytes are in the wrong endian so examine MSB
@@ -553,8 +637,8 @@ void Get_Board_Revision(int dev_type)
 }
 
 // DJF TESTING - function to test each of the outputs
-// Warning - do not run this function when connected 
-// to the target device. It is intended that a scope 
+// Warning - do not run this function when connected
+// to the target device. It is intended that a scope
 // or logic analyser will be monitoring the outputs
 //
 void testOutputs(void)
@@ -659,6 +743,14 @@ int main(int argc, char *argv[])
       {
          command_line_opt = 0;
       }
+      if (!ini_sget(jtag_config, "special_settings", "ignore_errors", "%d", &ignore_errors_opt))
+      {
+         ignore_errors_opt = 0;
+      }
+      if (!ini_sget(jtag_config, "special_settings", "verbose_debug", "%d", &verbose_debug))
+      {
+         verbose_debug = 0;
+      }
 
       // this must not be called until after everything is finished with 
       // as it invalidates all string pointers returned by the library
@@ -669,7 +761,7 @@ int main(int argc, char *argv[])
          printf("\nini file found, customer name is %s and cycles_to_wait is %d\n", custname, cycles_to_wait);
          printf("diags = %d, debug = %d, command line opt = %d\n", diagnostic_menu, debug_level, command_line_opt);
          printf("CPU Max Frequncy = %d\r\n", cpu_max_freq);
-     }
+      }
    }
    else
    {
@@ -680,6 +772,7 @@ int main(int argc, char *argv[])
       diagnostic_menu = 0;
       debug_level = 0;
       command_line_opt = 0;
+      ignore_errors_opt = 0;
    }
 
    fp = fopen("/proc/device-tree/model", "r");
@@ -2235,6 +2328,10 @@ void JTAGMenu()
 
    lcdClear(lcdHandle);
 
+   if (thisDeviceType == ETM_TGX)
+   {
+      Get_M5_Device_ID();
+   }
    Get_JTAG_Device_ID();   // Show ID of 386EX and abort if wrong
 
    Get_Board_Revision(thisDeviceType);
@@ -2495,7 +2592,7 @@ void diagnosticsMenu(int thisDeviceType, int totalMemory)
          lcdPosition(lcdHandle, 0, 0);
          lcdPrintf(lcdHandle, "Wr:0x%04X Addr %X", testValues[index], testAddress);
 
-         RAM_Write(PinState, testAddress, testValues[index]); 
+         RAM_Write(PinState, testAddress, testValues[index]);
       }
 
       for (testAddress = startAddress; testAddress < endAddress; testAddress += 2)
