@@ -113,6 +113,10 @@ int debug_level = 0;
 int command_line_opt = 0;
 int ignore_errors_opt = 0;
 
+int cpu_max_freq = 0;
+extern int wait_mode;                  // whether to wait for a nop loo count or elapsed cycle counter register vlaue
+int pulse_width_ns = 1000;             // the desired JTAG uls width of a mark or space clock pulse
+
 const word ID_String_Length = 32;
 
 unsigned long int A;                   // stores address data
@@ -169,6 +173,7 @@ void settingsMenu(void);
 void showIPDetails(void);
 void showHostname(void);
 void checkDateTime(void);
+void checkClockPulseWidth(int cycles_to_wait);
 void configurationMenu(void);
 void checkSignature(int);
 void dumpMemory(int thisDeviceType, int totalMemory);
@@ -677,11 +682,24 @@ int main(int argc, char *argv[])
    int thumb;
    int debug = 0;
 
-   int cpu_max_freq;
+   //int cpu_max_freq;
    int result = 0;
 
    char pi_model[128];
    FILE *fp;
+
+   // DJF TESTING
+   //uint32_t t0 = ccnt_read();
+   //uint32_t t1 = ccnt_read();
+   ///printf("\n%u\n", t1-t0);
+   //volatile uint64_t n = 100000000;
+   //while(n > 0) n--;
+   //t1 = ccnt_read();
+   //printf("\n%u\n", t1-t0);
+
+// DJF TESTING
+//test_wait_cycles();
+//exit(0);
 
    // variables for ini file processing
    //
@@ -707,16 +725,34 @@ int main(int argc, char *argv[])
          cpu_max_freq = 700000;
       }
    }
-
    cycles_to_wait = cpu_max_freq / 1000; // this gives us 1us wait time
+
+//printf("\ncycles_to_wait = %d (1)\r\n", cycles_to_wait);
 
    if (jtag_config != NULL)
    {
       ini_sget(jtag_config, "settings", "customer_name", NULL, &custname);
+
+      if (!ini_sget(jtag_config, "settings", "pulse_width_ns", "%d", &pulse_width_ns))
+      {
+         pulse_width_ns = 1000; // 1us
+      }
+
+//printf("\npulse_width_ns = %d\r\n", pulse_width_ns);
+
+      cycles_to_wait = (cpu_max_freq * pulse_width_ns) / 1000000;
+
+//printf("\ncycles_to_wait = %d (2)\r\n", cycles_to_wait);
+
       // this will override CPU based setting from cpu_max_freq
       if (!ini_sget(jtag_config, "settings", "clock_timing", "%d", &cycles_to_wait))
       {
-         cycles_to_wait = cpu_max_freq / 1000;
+         cycles_to_wait = (cpu_max_freq * pulse_width_ns) / 1000000;
+      }
+
+      if (!ini_sget(jtag_config, "settings", "wait_mode", "%d", &wait_mode))
+      {
+         wait_mode = CCR_LOOP;
       }
 
       //ini_sget(jtag_config, "display", "type", NULL, &display_type);
@@ -775,6 +811,9 @@ int main(int argc, char *argv[])
       ignore_errors_opt = 0;
    }
 
+// DJF TESTING
+printf("\ncycles_to_wait = %d (3)\r\n", cycles_to_wait);
+
    fp = fopen("/proc/device-tree/model", "r");
    if (fp != NULL)
    {
@@ -790,7 +829,6 @@ int main(int argc, char *argv[])
       }
       fclose(fp);
    }
-
 
    printf("Flowbird JTAG Adaptor for TGX Range\n");
    printf("===================================\n");
@@ -1362,6 +1400,7 @@ void dump_to_file(unsigned long int start, unsigned long int end, int dev_type, 
          lcdPuts(lcdHandle, progress);
       }
       // see if the user wants to cancel - just now an again
+/*
       if((bytes_read & 0xF) == 0)
       {
          if (digitalRead(AF_SELECT) == LOW)
@@ -1391,7 +1430,7 @@ void dump_to_file(unsigned long int start, unsigned long int end, int dev_type, 
                lcdPuts(lcdHandle, progress);
             }
          }
-      }
+      }*/
    }
    fclose(dataFile);
    printf("\nBinary file %s has been created (or overwritten!)\n", filename);
@@ -2049,6 +2088,7 @@ void settingsMenu()
       sprintf(menuItems[numberOfItems++], "%-19s", "Display IP Address");
       sprintf(menuItems[numberOfItems++], "%-19s", "Display Hostname");
       sprintf(menuItems[numberOfItems++], "%-19s", "Check Date & Time");
+      sprintf(menuItems[numberOfItems++], "%-19s", "Check Clock Period");
       sprintf(menuItems[numberOfItems++], "%-19s", "Configuration");
       sprintf(menuItems[numberOfItems++], "%-19s", "[return]");
       switch (select_menu_item(numberOfItems, menuItems, "Settings"))
@@ -2062,14 +2102,18 @@ void settingsMenu()
          showHostname();
          break;
       case 2:
-         // shpw the current date and time
+         // show the current date and time
          checkDateTime();
          break;
       case 3:
+         // show the current JTAG Pulse Width
+         checkClockPulseWidth(cycles_to_wait);
+         break;
+      case 4:
          // shpw the current date and time
          configurationMenu();
          break;
-      case 4:
+      case 5:
          // return to previous menu
          running = false;
          break;
@@ -2077,6 +2121,38 @@ void settingsMenu()
          break;
       } // end of switch
    } // end of while running loop
+}
+
+void checkClockPulseWidth(int cycles_to_wait)
+{
+   // 1us is max_cpu_freq / 1000
+   int cycles_us = cpu_max_freq / 1000; // how many clock cycles per microsecond
+   int microSeconds =  cycles_to_wait / cycles_us;
+   int nanoSeconds = cycles_to_wait % cycles_us;
+
+   lcdClear(lcdHandle);
+   lcdPosition(lcdHandle, 0, 0);
+   lcdPrintf(lcdHandle, "JTAG Pulse Width:");
+   lcdPosition(lcdHandle, 2, 1);
+   lcdPrintf(lcdHandle, "%d.%dus", microSeconds, nanoSeconds);
+   lcdPosition(lcdHandle, 2, 2);
+   switch(wait_mode)
+   {
+      case NOP_LOOP:
+      {
+         lcdPrintf(lcdHandle, "Mode: \"nop\" loop");
+         break;
+      }
+      case CCR_LOOP:
+      default:
+      {
+         lcdPrintf(lcdHandle, "Mode: CCR loop");
+         break;
+      }
+   }
+   lcdPosition(lcdHandle, 0, display_rows - 1);
+   lcdPuts(lcdHandle, " ...Press SELECT...");
+   waitForEnter();
 }
 
 

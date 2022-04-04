@@ -37,6 +37,8 @@ int Get_Flash_Dev(void);
 unsigned long int Program_Flash_Data(char * filename, unsigned long int start_address, int lcdHandle, int rows, int columns);
 //void Read_FLASH_Data(TBD);
 void wait_cycles(unsigned int);
+//static inline uint32_t ccnt_read (void);
+void test_wait_cycles(void);
 
 void TMS_Low(void);
 void TMS_High(void);

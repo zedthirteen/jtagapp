@@ -58,5 +58,11 @@ enum action
    EXIT_TO_CMD // only if DJF_DEBUG defined
 };
 
+enum timing_mode
+{
+   NOP_LOOP = 0, // volatile "nop" for loop
+   CCR_LOOP      // volatile kernel cycle counter for loop
+};
+
 #endif // JTAG_H include sentry
 
